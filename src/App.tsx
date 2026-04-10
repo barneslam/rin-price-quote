@@ -179,9 +179,16 @@ export default function App() {
   const [timeOfDay, setTimeOfDay] = useState("standard");
 
   const [showReference, setShowReference] = useState(false);
+  const [pickupLocation, setPickupLocation] = useState("");
+  const [notes, setNotes] = useState("");
 
   // Result
   const [quote, setQuote] = useState<QuoteResult | null>(null);
+
+  // AI Agent state
+  const [aiResult, setAiResult] = useState<any>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   useEffect(() => {
     loadPricingData();
@@ -379,6 +386,47 @@ export default function App() {
     }
     setAuthUser(null);
     setDisclaimerAccepted(false);
+  }
+
+  async function getAiQuote() {
+    const config = pricingConfigs.find(c => c.incident_type_id === selectedIncident);
+    if (!config) return;
+
+    setAiLoading(true);
+    setAiError("");
+    setAiResult(null);
+
+    try {
+      const res = await fetch("https://zyoszbmahxnfcokuzkuv.supabase.co/functions/v1/pricing-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY", "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY" },
+        body: JSON.stringify({
+          incidentType: config.incident_name,
+          distanceKm: distance,
+          vehicleMake: vehicleMake || undefined,
+          timeOfDay: timeOfDay,
+          pickupLocation: pickupLocation || undefined,
+          notes: notes || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      setAiResult(data);
+
+      // Log usage
+      if (authUser) {
+        supabase.from("quote_usage_log").insert({
+          user_id: authUser.user_id,
+          username: authUser.username,
+          action: "ai_quote_generated",
+          details: { incident: config.incident_name, distance, vehicleMake, tier: data.tier, price: data.pricing?.final_price },
+        });
+      }
+    } catch (err) {
+      setAiError("Failed to reach AI pricing agent");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   const calculateQuote = useCallback(() => {
@@ -742,10 +790,37 @@ export default function App() {
             <option value="peak_evening">Peak Evening (4-7pm weekdays) &mdash; 1.25x</option>
             <option value="night">Night (9pm-6am) &mdash; 1.40x</option>
           </select>
+
+          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Pickup Location</label>
+          <input
+            type="text"
+            value={pickupLocation}
+            onChange={e => setPickupLocation(e.target.value)}
+            placeholder="e.g. 401 & Keele St, Toronto"
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 15, marginBottom: 14, boxSizing: "border-box" }}
+          />
+
+          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Notes</label>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="e.g. Vehicle in underground parking, no keys..."
+            rows={2}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 15, marginBottom: 16, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }}
+          />
+
+          <button
+            onClick={getAiQuote}
+            disabled={aiLoading}
+            style={{ width: "100%", padding: "12px", borderRadius: 8, background: aiLoading ? "#6c757d" : "#7c3aed", color: "white", fontSize: 15, fontWeight: 600, border: "none", cursor: aiLoading ? "default" : "pointer" }}
+          >
+            {aiLoading ? "AI Agent Thinking..." : "Get AI Agent Quote"}
+          </button>
+          {aiError && <p style={{ color: "#dc3545", fontSize: 13, marginTop: 8 }}>{aiError}</p>}
         </div>
 
         {/* Right: Quote Result */}
-        <div style={{ background: "#fff", borderRadius: 12, padding: 24, border: "1px solid #dee2e6" }}>
+        <div style={{ background: "#fff", borderRadius: 12, padding: 20, border: "1px solid #dee2e6" }}>
           <h2 style={{ marginTop: 0, fontSize: 18, color: "#333" }}>Price Breakdown</h2>
 
           {quote && (
@@ -829,6 +904,114 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* AI Agent Result */}
+      {aiResult && (
+        <div style={{ marginTop: 24, background: "#fff", borderRadius: 12, padding: 20, border: "2px solid #7c3aed" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h2 style={{ margin: 0, fontSize: 18, color: "#7c3aed" }}>AI Agent Quote</h2>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 12, background: aiResult.tier === "tools" ? "#7c3aed" : "#0d6efd", color: "white", fontWeight: 600 }}>
+                {aiResult.tier === "tools" ? "Deep Reasoning" : "Fast Quote"}
+              </span>
+              {aiResult.escalated && (
+                <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 12, background: "#fd7e14", color: "white", fontWeight: 600 }}>
+                  Escalated
+                </span>
+              )}
+              {aiResult.duration_ms && (
+                <span style={{ fontSize: 11, color: "#999" }}>{(aiResult.duration_ms / 1000).toFixed(1)}s</span>
+              )}
+            </div>
+          </div>
+
+          {(() => {
+            const p = aiResult.pricing || {};
+            const price = p.final_price;
+            const reasoning = p.reasoning;
+            const confidence = p.confidence;
+            const surcharges = p.surcharges || [];
+            const toolsUsed = p.tools_used || [];
+            const tierBreakdown = p.tier_breakdown || [];
+
+            return (
+              <>
+                {price && (
+                  <div style={{ background: "#7c3aed", color: "white", borderRadius: 10, padding: "16px 20px", marginBottom: 16, textAlign: "center" }}>
+                    <div style={{ fontSize: 36, fontWeight: 700 }}>${Number(price).toFixed(2)}</div>
+                    <div style={{ fontSize: 12, opacity: 0.85 }}>
+                      AI Agent Price
+                      {confidence && <> &mdash; Confidence: <strong>{confidence}</strong></>}
+                    </div>
+                  </div>
+                )}
+
+                {/* Comparison with formula */}
+                {price && quote && (
+                  <div style={{ background: Math.abs(price - quote.final_price) < 1 ? "#d1e7dd" : "#fff3cd", padding: "10px 14px", borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
+                    <strong>Formula: ${quote.final_price.toFixed(2)}</strong> vs <strong>AI: ${Number(price).toFixed(2)}</strong>
+                    {" "}&mdash;{" "}
+                    {Math.abs(price - quote.final_price) < 1 ? (
+                      <span style={{ color: "#198754" }}>Prices match</span>
+                    ) : (
+                      <span style={{ color: "#fd7e14" }}>
+                        Difference: ${Math.abs(price - quote.final_price).toFixed(2)}
+                        {" "}({price > quote.final_price ? "AI higher" : "Formula higher"})
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Surcharges */}
+                {surcharges.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <strong style={{ fontSize: 13 }}>Surcharges Applied:</strong>
+                    {surcharges.map((s: any, i: number) => (
+                      <div key={i} style={{ fontSize: 13, color: "#dc3545", padding: "4px 0", paddingLeft: 12 }}>
+                        {s.name}: ${Number(s.amount).toFixed(2)} &mdash; <em>{s.reason}</em>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Tier breakdown */}
+                {tierBreakdown.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <strong style={{ fontSize: 13 }}>Distance Breakdown:</strong>
+                    {tierBreakdown.map((t: any, i: number) => (
+                      <div key={i} style={{ fontSize: 13, color: "#666", padding: "2px 0", paddingLeft: 12 }}>
+                        {t.tier}: {t.km}km x ${t.rate}/km = ${Number(t.charge).toFixed(2)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Reasoning */}
+                {reasoning && (
+                  <div style={{ background: "#f8f9fa", borderRadius: 8, padding: 14, fontSize: 13, lineHeight: 1.6, marginBottom: 12, maxHeight: 200, overflow: "auto" }}>
+                    <strong>AI Reasoning:</strong><br />
+                    {reasoning}
+                  </div>
+                )}
+
+                {/* Tools used */}
+                {toolsUsed.length > 0 && (
+                  <div style={{ fontSize: 11, color: "#999" }}>
+                    Tools used: {toolsUsed.join(", ")}
+                  </div>
+                )}
+
+                {/* Escalation reason */}
+                {aiResult.escalation_reason && (
+                  <div style={{ fontSize: 11, color: "#fd7e14", marginTop: 4 }}>
+                    Escalation: {aiResult.escalation_reason}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       {/* Reference Tables Toggle */}
       <div style={{ marginTop: 24, textAlign: "center" }}>
