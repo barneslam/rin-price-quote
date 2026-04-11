@@ -626,6 +626,55 @@ export default function App() {
     if (!loading && selectedIncident) calculateQuote();
   }, [loading, selectedIncident, distance, vehicleMake, timeOfDay, calculateQuote]);
 
+  // ===== OTP VERIFICATION (must come before general auth check) =====
+  if (showOtp && !authUser) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#f8f9fa", boxSizing: "border-box" }}>
+        <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 16, padding: "32px 24px", border: "1px solid #dee2e6", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+          <div style={{ textAlign: "center", marginBottom: 28 }}>
+            <div style={{ fontSize: 36, fontWeight: 700, color: "#0d6efd", marginBottom: 4 }}>RIN</div>
+            <div style={{ fontSize: 14, color: "#6c757d" }}>Verify Your Identity</div>
+          </div>
+
+          <div style={{ background: "#e8f4fd", borderRadius: 8, padding: 16, textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 13, color: "#495057" }}>Verification code sent to</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#0d6efd", marginTop: 4 }}>{otpMaskedPhone}</div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>Check your SMS for the 6-digit code</div>
+          </div>
+
+          <form onSubmit={handleVerifyOtp}>
+            <div style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Enter 6-Digit Code</div>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={otpCode}
+              onChange={e => setOtpCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="000000"
+              autoFocus
+              style={{ width: "100%", padding: "14px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 28, fontWeight: 700, letterSpacing: 8, textAlign: "center", boxSizing: "border-box", marginBottom: 16 }}
+            />
+            {loginError && <p style={{ color: "#dc3545", fontSize: 13, margin: "0 0 12px" }}>{loginError}</p>}
+            <button
+              type="submit"
+              disabled={loginLoading || otpCode.length !== 6}
+              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#0d6efd", color: "white", fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer", opacity: loginLoading ? 0.6 : 1, marginBottom: 12 }}
+            >
+              {loginLoading ? "Verifying..." : "Verify Code"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowOtp(false); setOtpCode(""); setLoginError(""); setPendingAuthUser(null); }}
+              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#f8f9fa", color: "#333", fontSize: 14, fontWeight: 600, border: "1px solid #dee2e6", cursor: "pointer" }}
+            >
+              Back to Login
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   // ===== AUTH SCREENS (Login / Register / Forgot) =====
   if (!authUser) {
     const inputStyle = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 15, marginBottom: 14, boxSizing: "border-box" as const };
@@ -725,54 +774,7 @@ export default function App() {
     );
   }
 
-  // ===== OTP VERIFICATION =====
-  if (showOtp && !authUser) {
-    return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#f8f9fa", boxSizing: "border-box" }}>
-        <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 16, padding: "32px 24px", border: "1px solid #dee2e6", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
-          <div style={{ textAlign: "center", marginBottom: 28 }}>
-            <div style={{ fontSize: 36, fontWeight: 700, color: "#0d6efd", marginBottom: 4 }}>RIN</div>
-            <div style={{ fontSize: 14, color: "#6c757d" }}>Verify Your Identity</div>
-          </div>
 
-          <div style={{ background: "#e8f4fd", borderRadius: 8, padding: 16, textAlign: "center", marginBottom: 20 }}>
-            <div style={{ fontSize: 13, color: "#495057" }}>Verification code sent to</div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: "#0d6efd", marginTop: 4 }}>{otpMaskedPhone}</div>
-            <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>Check your SMS for the 6-digit code</div>
-          </div>
-
-          <form onSubmit={handleVerifyOtp}>
-            <div style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Enter 6-Digit Code</div>
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={6}
-              value={otpCode}
-              onChange={e => setOtpCode(e.target.value.replace(/\D/g, ""))}
-              placeholder="000000"
-              autoFocus
-              style={{ width: "100%", padding: "14px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 28, fontWeight: 700, letterSpacing: 8, textAlign: "center", boxSizing: "border-box", marginBottom: 16 }}
-            />
-            {loginError && <p style={{ color: "#dc3545", fontSize: 13, margin: "0 0 12px" }}>{loginError}</p>}
-            <button
-              type="submit"
-              disabled={loginLoading || otpCode.length !== 6}
-              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#0d6efd", color: "white", fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer", opacity: loginLoading ? 0.6 : 1, marginBottom: 12 }}
-            >
-              {loginLoading ? "Verifying..." : "Verify Code"}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setShowOtp(false); setOtpCode(""); setLoginError(""); setPendingAuthUser(null); }}
-              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#f8f9fa", color: "#333", fontSize: 14, fontWeight: 600, border: "1px solid #dee2e6", cursor: "pointer" }}
-            >
-              Back to Login
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
 
   // ===== DISCLAIMER POPUP =====
   if (showDisclaimer || !disclaimerAccepted) {
