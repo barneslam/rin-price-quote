@@ -181,6 +181,9 @@ export default function App() {
   const [showReference, setShowReference] = useState(false);
   const [pickupLocation, setPickupLocation] = useState("");
   const [notes, setNotes] = useState("");
+  const [smsPhone, setSmsPhone] = useState("");
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsResult, setSmsResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Result
   const [quote, setQuote] = useState<QuoteResult | null>(null);
@@ -426,6 +429,54 @@ export default function App() {
       setAiError("Failed to reach AI pricing agent");
     } finally {
       setAiLoading(false);
+    }
+  }
+
+  async function sendQuoteSms() {
+    if (!smsPhone || !quote) return;
+    const config = pricingConfigs.find(c => c.incident_type_id === selectedIncident);
+    if (!config) return;
+
+    setSmsSending(true);
+    setSmsResult(null);
+
+    try {
+      const res = await fetch("https://zyoszbmahxnfcokuzkuv.supabase.co/functions/v1/send-quote-sms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY", "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY" },
+        body: JSON.stringify({
+          customerPhone: smsPhone,
+          incidentType: config.incident_name,
+          vehicleInfo: vehicleMake ? `${vehicleMake}` : undefined,
+          distance: distance,
+          estimatedPrice: quote.final_price,
+          breakdown: {
+            base_rate: quote.base_rate,
+            distance_charge: quote.distance_charge,
+            luxury_surcharge: quote.luxury_surcharge,
+            time_multiplier: quote.time_multiplier,
+          },
+          senderName: authUser?.full_name,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setSmsResult({ success: true, message: `Quote sent to +1${smsPhone}` });
+        if (authUser) {
+          supabase.from("quote_usage_log").insert({
+            user_id: authUser.user_id, username: authUser.username,
+            action: "quote_sms_sent",
+            details: { phone: smsPhone, price: quote.final_price, incident: config.incident_name },
+          });
+        }
+      } else {
+        setSmsResult({ success: false, message: data.error || "Failed to send" });
+      }
+    } catch {
+      setSmsResult({ success: false, message: "Failed to reach SMS service" });
+    } finally {
+      setSmsSending(false);
     }
   }
 
@@ -928,6 +979,34 @@ export default function App() {
                 ){quote.time_multiplier !== 1.0 ? ` x ${quote.time_multiplier}` : ""}
                 {" = "}
                 <strong>${quote.final_price.toFixed(2)}</strong>
+              </div>
+
+              {/* Send Quote via SMS */}
+              <div style={{ marginTop: 16, padding: "14px 0 0", borderTop: "1px solid #eee" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#333", marginBottom: 8 }}>Send Quote to Customer</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ width: 40, padding: "8px 0", textAlign: "center", fontSize: 13, color: "#999", border: "1px solid #ced4da", borderRadius: "8px 0 0 8px", background: "#f8f9fa" }}>+1</div>
+                  <input
+                    type="tel"
+                    value={smsPhone}
+                    onChange={e => setSmsPhone(e.target.value.replace(/\D/g, ''))}
+                    placeholder="6475551234"
+                    maxLength={10}
+                    style={{ flex: 1, padding: "8px 10px", borderRadius: "0 8px 8px 0", border: "1px solid #ced4da", fontSize: 14, boxSizing: "border-box" }}
+                  />
+                  <button
+                    onClick={sendQuoteSms}
+                    disabled={smsSending || smsPhone.length !== 10}
+                    style={{ padding: "8px 16px", borderRadius: 8, background: smsSending ? "#6c757d" : "#198754", color: "white", fontSize: 13, fontWeight: 600, border: "none", cursor: smsSending ? "default" : "pointer", whiteSpace: "nowrap" }}
+                  >
+                    {smsSending ? "Sending..." : "Send SMS"}
+                  </button>
+                </div>
+                {smsResult && (
+                  <div style={{ fontSize: 12, marginTop: 6, color: smsResult.success ? "#198754" : "#dc3545", fontWeight: 600 }}>
+                    {smsResult.message}
+                  </div>
+                )}
               </div>
             </>
           )}
