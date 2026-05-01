@@ -232,7 +232,7 @@ export default function App() {
         username: authUser.username,
         action: "session_closed",
         details: { reminder: "Consider referring drivers to earn rewards!" },
-      }).catch(() => {});
+      });
     };
 
     window.addEventListener("beforeunload", handleBeforeUnload);
