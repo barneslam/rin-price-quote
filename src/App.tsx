@@ -2,6 +2,22 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabase";
 
 const MOBILE_STYLES = `
+  :root {
+    --bg: #0a0e27;
+    --bg2: #0f1535;
+    --bg3: #151d45;
+    --bd: #1f2d52;
+    --bd2: #2d4170;
+    --text: #f5f7fb;
+    --text2: #9ca3b3;
+    --text3: #6b7590;
+    --primary: #e94560;
+    --green: #22c55e;
+    --gold: #f59e0b;
+  }
+  input[type="tel"]::placeholder {
+    color: #6b7590;
+  }
   .pq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
   .pq-container { max-width: 900px; margin: 0 auto; padding: 24px 20px; }
   .pq-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
@@ -138,7 +154,7 @@ export default function App() {
   // Auth state
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
-  const [loginUsername, setLoginUsername] = useState("");
+  const [loginUsername, setLoginUsername] = useState("+1 ");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -147,23 +163,27 @@ export default function App() {
   const [showOtp, setShowOtp] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [otpMaskedPhone, setOtpMaskedPhone] = useState("");
+  const [testOtpCode, setTestOtpCode] = useState("");
   const [pendingAuthUser, setPendingAuthUser] = useState<AuthUser | null>(null);
+  const [showReferral, setShowReferral] = useState(false);
+  const [referralPhone, setReferralPhone] = useState("+1 ");
+  const [referralLoading, setReferralLoading] = useState(false);
+  const [referralMessage, setReferralMessage] = useState("");
 
   // Registration state
-  const [regUsername, setRegUsername] = useState("");
   const [regPassword, setRegPassword] = useState("");
   const [regConfirmPassword, setRegConfirmPassword] = useState("");
   const [regFullName, setRegFullName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regCompany, setRegCompany] = useState("");
-  const [regPhone, setRegPhone] = useState("");
+  const [regPhone, setRegPhone] = useState("+1 ");
+  const [regIsIndependent, setRegIsIndependent] = useState(true);
   const [regError, setRegError] = useState("");
   const [regSuccess, setRegSuccess] = useState("");
   const [regLoading, setRegLoading] = useState(false);
 
   // Forgot password state
-  const [forgotUsername, setForgotUsername] = useState("");
-  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotPhone, setForgotPhone] = useState("+1 ");
   const [forgotNewPassword, setForgotNewPassword] = useState("");
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
   const [forgotError, setForgotError] = useState("");
@@ -200,6 +220,24 @@ export default function App() {
   useEffect(() => {
     loadPricingData();
   }, []);
+
+  // Handle page unload: send referral reminder SMS if logged in
+  useEffect(() => {
+    if (!authUser) return;
+
+    const handleBeforeUnload = () => {
+      // Log session close and optionally send SMS reminder
+      supabase.from("quote_usage_log").insert({
+        user_id: authUser.user_id,
+        username: authUser.username,
+        action: "session_closed",
+        details: { reminder: "Consider referring drivers to earn rewards!" },
+      }).catch(() => {});
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [authUser]);
 
   async function loadPricingData() {
     const [configRes, tiersRes, multRes, overrideRes] = await Promise.all([
@@ -244,56 +282,48 @@ export default function App() {
     setLoading(false);
   }
 
+  // Normalize phone number: remove all non-digits
+  function normalizePhone(phone: string): string {
+    return phone.replace(/\D/g, "");
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoginError("");
     setLoginLoading(true);
 
-    const { data, error } = await supabase.rpc("verify_quote_login", {
-      p_username: loginUsername.toLowerCase().trim(),
-      p_password: loginPassword,
-    });
-
-    if (error || !data || !(data as any).success) {
-      setLoginError((data as any)?.error || "Login failed");
+    // Normalize phone: strip all non-digits, add back +1 if needed
+    const normalizedPhone = normalizePhone(loginUsername);
+    if (normalizedPhone.length === 0) {
+      setLoginError("Please enter a valid phone number");
       setLoginLoading(false);
       return;
     }
 
-    const user: AuthUser = {
-      user_id: (data as any).user_id,
-      username: (data as any).username,
-      full_name: (data as any).full_name,
-      company: (data as any).company || "",
-    };
-
-    // Log login
-    await supabase.from("quote_usage_log").insert({
-      user_id: user.user_id,
-      username: user.username,
-      action: "login",
-      details: { full_name: user.full_name, company: user.company },
+    // Generate OTP directly (phone-based access, no password required)
+    const { data, error } = await supabase.rpc("generate_quote_user_otp", {
+      p_username: normalizedPhone,  // Use phone as identifier (digits only)
     });
 
-    setPendingAuthUser(user);
-    setLoginLoading(false);
-
-    // Send OTP via SMS
-    try {
-      const otpRes = await fetch("https://zyoszbmahxnfcokuzkuv.supabase.co/functions/v1/send-quote-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY", "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY" },
-        body: JSON.stringify({ username: loginUsername.toLowerCase().trim() }),
-      });
-      const otpData = await otpRes.json();
-      if (otpData.success) {
-        setOtpMaskedPhone(otpData.phone_masked || "your phone");
-      }
-    } catch (err) {
-      console.error("OTP send error:", err);
+    if (error || !data || !(data as any).success) {
+      setLoginError((data as any)?.error || "Phone number not found");
+      setLoginLoading(false);
+      return;
     }
 
+    // Create temporary user object from OTP response
+    const tempUser: AuthUser = {
+      user_id: (data as any).user_id,
+      username: (data as any).phone || loginUsername,
+      full_name: "",  // Will be populated after OTP verification
+      company: "",
+    };
+
+    setPendingAuthUser(tempUser);
+    setOtpMaskedPhone((data as any).phone);
+    setTestOtpCode((data as any).code || "");
     setShowOtp(true);
+    setLoginLoading(false);
   }
 
   async function handleVerifyOtp(e: React.FormEvent) {
@@ -301,8 +331,9 @@ export default function App() {
     setLoginError("");
     setLoginLoading(true);
 
+    const normalizedPhone = normalizePhone(loginUsername);
     const { data, error } = await supabase.rpc("verify_quote_user_otp", {
-      p_username: loginUsername.toLowerCase().trim(),
+      p_username: normalizedPhone,
       p_code: otpCode.trim(),
     });
 
@@ -312,10 +343,33 @@ export default function App() {
       return;
     }
 
-    // OTP verified — set user and show disclaimer
-    if (pendingAuthUser) {
-      setAuthUser(pendingAuthUser);
+    // OTP verified — fetch full user details from database
+    const { data: userRecords } = await supabase
+      .from("quote_users")
+      .select("user_id, username, full_name, company, phone")
+      .eq("user_id", (data as any).user_id)
+      .limit(1);
+
+    if (userRecords && userRecords.length > 0) {
+      const fullUser = userRecords[0];
+      const authUser: AuthUser = {
+        user_id: fullUser.user_id,
+        username: fullUser.username,
+        full_name: fullUser.full_name || "",
+        company: fullUser.company || "",
+      };
+
+      // Log OTP verification
+      await supabase.from("quote_usage_log").insert({
+        user_id: authUser.user_id,
+        username: authUser.username,
+        action: "otp_verified",
+        details: { phone: fullUser.phone },
+      });
+
+      setAuthUser(authUser);
     }
+
     setLoginLoading(false);
     setShowOtp(false);
     setShowDisclaimer(true);
@@ -334,14 +388,14 @@ export default function App() {
       setRegError("Password must be at least 6 characters");
       return;
     }
-    if (!regUsername || !regFullName || !regPhone) {
-      setRegError("Full name, username, and phone number are required");
+    if (!regFullName || !regPhone) {
+      setRegError("Full name and phone number are required");
       return;
     }
 
     setRegLoading(true);
-    const { data, error } = await supabase.rpc("register_quote_user", {
-      p_username: regUsername.toLowerCase().trim(),
+    const { data, error } = await supabase.rpc("register_quote_driver", {
+      p_username: regPhone.trim(),  // Phone is the unique identifier
       p_password: regPassword,
       p_full_name: regFullName.trim(),
       p_email: regEmail.toLowerCase().trim(),
@@ -359,7 +413,7 @@ export default function App() {
     setRegLoading(false);
     setTimeout(() => {
       setAuthView("login");
-      setLoginUsername(regUsername.toLowerCase().trim());
+      setLoginUsername(regPhone.trim());
       setRegSuccess("");
     }, 2000);
   }
@@ -380,8 +434,7 @@ export default function App() {
 
     setForgotLoading(true);
     const { data, error } = await supabase.rpc("reset_quote_password", {
-      p_username: forgotUsername.toLowerCase().trim(),
-      p_email: forgotEmail.toLowerCase().trim(),
+      p_username: forgotPhone.trim(),  // Phone is the unique identifier
       p_new_password: forgotNewPassword,
     });
 
@@ -395,7 +448,7 @@ export default function App() {
     setForgotLoading(false);
     setTimeout(() => {
       setAuthView("login");
-      setLoginUsername(forgotUsername.toLowerCase().trim());
+      setLoginUsername(forgotPhone.trim());
       setForgotSuccess("");
     }, 2000);
   }
@@ -629,21 +682,28 @@ export default function App() {
   // ===== OTP VERIFICATION (must come before general auth check) =====
   if (showOtp && !authUser) {
     return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#f8f9fa", boxSizing: "border-box" }}>
-        <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 16, padding: "32px 24px", border: "1px solid #dee2e6", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#0a0e27", boxSizing: "border-box" }}>
+        <div style={{ width: "100%", maxWidth: 420, background: "#0f1535", borderRadius: 16, padding: "32px 24px", border: "1px solid #1f2d52", boxShadow: "0 24px 80px rgba(0,0,0,0.4)" }}>
           <div style={{ textAlign: "center", marginBottom: 28 }}>
-            <div style={{ fontSize: 36, fontWeight: 700, color: "#0d6efd", marginBottom: 4 }}>RIN</div>
-            <div style={{ fontSize: 14, color: "#6c757d" }}>Verify Your Identity</div>
+            <div style={{ fontSize: 36, fontWeight: 700, color: "#e94560", marginBottom: 4 }}>RIN</div>
+            <div style={{ fontSize: 14, color: "#9ca3b3" }}>Verify Your Identity</div>
           </div>
 
-          <div style={{ background: "#e8f4fd", borderRadius: 8, padding: 16, textAlign: "center", marginBottom: 20 }}>
-            <div style={{ fontSize: 13, color: "#495057" }}>Verification code sent to</div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: "#0d6efd", marginTop: 4 }}>{otpMaskedPhone}</div>
-            <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>Check your SMS for the 6-digit code</div>
+          <div style={{ background: "rgba(233, 69, 96, 0.08)", borderRadius: 8, padding: 16, textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 13, color: "#9ca3b3" }}>Verification code sent to</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#e94560", marginTop: 4 }}>{otpMaskedPhone}</div>
+            <div style={{ fontSize: 12, color: "#6b7590", marginTop: 4 }}>Check your SMS for the 6-digit code</div>
           </div>
+
+          {testOtpCode && (
+            <div style={{ background: "rgba(34, 197, 86, 0.08)", borderRadius: 8, padding: 12, marginBottom: 16, textAlign: "center", border: "1px solid rgba(34, 197, 86, 0.25)" }}>
+              <div style={{ fontSize: 11, color: "#6b7590", marginBottom: 6, fontWeight: 600, letterSpacing: 0.5 }}>TEST CODE (Development Only)</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "#22c55e", letterSpacing: 4 }}>{testOtpCode}</div>
+            </div>
+          )}
 
           <form onSubmit={handleVerifyOtp}>
-            <div style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Enter 6-Digit Code</div>
+            <div style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>Enter 6-Digit Code</div>
             <input
               type="text"
               inputMode="numeric"
@@ -652,20 +712,20 @@ export default function App() {
               onChange={e => setOtpCode(e.target.value.replace(/\D/g, ""))}
               placeholder="000000"
               autoFocus
-              style={{ width: "100%", padding: "14px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 28, fontWeight: 700, letterSpacing: 8, textAlign: "center", boxSizing: "border-box", marginBottom: 16 }}
+              style={{ width: "100%", padding: "14px 12px", borderRadius: 8, border: "1.5px solid #1f2d52", background: "#151d45", color: "#f5f7fb", fontSize: 28, fontWeight: 700, letterSpacing: 8, textAlign: "center", boxSizing: "border-box", marginBottom: 16 }}
             />
-            {loginError && <p style={{ color: "#dc3545", fontSize: 13, margin: "0 0 12px" }}>{loginError}</p>}
+            {loginError && <p style={{ color: "#ef4444", fontSize: 13, margin: "0 0 12px" }}>{loginError}</p>}
             <button
               type="submit"
               disabled={loginLoading || otpCode.length !== 6}
-              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#0d6efd", color: "white", fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer", opacity: loginLoading ? 0.6 : 1, marginBottom: 12 }}
+              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#e94560", color: "white", fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer", opacity: loginLoading ? 0.6 : 1, marginBottom: 12 }}
             >
               {loginLoading ? "Verifying..." : "Verify Code"}
             </button>
             <button
               type="button"
-              onClick={() => { setShowOtp(false); setOtpCode(""); setLoginError(""); setPendingAuthUser(null); }}
-              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#f8f9fa", color: "#333", fontSize: 14, fontWeight: 600, border: "1px solid #dee2e6", cursor: "pointer" }}
+              onClick={() => { setShowOtp(false); setOtpCode(""); setLoginError(""); setPendingAuthUser(null); setTestOtpCode(""); }}
+              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#151d45", color: "#9ca3b3", fontSize: 14, fontWeight: 600, border: "1px solid #1f2d52", cursor: "pointer" }}
             >
               Back to Login
             </button>
@@ -675,18 +735,124 @@ export default function App() {
     );
   }
 
+  // ===== REFERRAL MODAL (optional, on main screen) =====
+  if (showReferral && authUser) {
+    const referralUrl = `https://rin-app-download-page.netlify.app?ref=${authUser.username}`;
+    return (
+      <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", zIndex: 1000 }}>
+        <div style={{ width: "100%", maxWidth: 480, background: "#0f1535", borderRadius: 16, padding: "32px 24px", border: "1px solid #1f2d52", boxShadow: "0 24px 80px rgba(0,0,0,0.4)", maxHeight: "90vh", overflowY: "auto" }}>
+          <div style={{ textAlign: "center", marginBottom: 24 }}>
+            <div style={{ fontSize: 36, fontWeight: 700, color: "#e94560", marginBottom: 4 }}>RIN</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#f5f7fb" }}>Refer a Driver</div>
+          </div>
+
+          <div style={{ background: "rgba(34, 197, 86, 0.1)", borderRadius: 8, padding: 16, textAlign: "center", marginBottom: 20, border: "1px solid rgba(34, 197, 86, 0.3)" }}>
+            <div style={{ fontSize: 13, color: "#9ca3b3", marginBottom: 12 }}>Your Referral Link</div>
+            <div style={{ background: "#151d45", borderRadius: 8, padding: 12, marginBottom: 12, wordBreak: "break-all", fontSize: 12, color: "#22c55e", fontFamily: "monospace", border: "1px solid rgba(34, 197, 86, 0.2)" }}>{referralUrl}</div>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(referralUrl);
+                setReferralMessage("Link copied to clipboard!");
+                setTimeout(() => setReferralMessage(""), 2000);
+              }}
+              style={{ width: "100%", padding: "10px 16px", borderRadius: 8, background: "#22c55e", color: "white", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" }}
+            >
+              Copy Link
+            </button>
+          </div>
+
+          <div style={{ background: "rgba(100, 116, 139, 0.08)", borderRadius: 8, padding: 16, marginBottom: 24, fontSize: 13, color: "#9ca3b3", lineHeight: 1.6 }}>
+            <div style={{ fontWeight: 600, color: "#f5f7fb", marginBottom: 8 }}>How it works:</div>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              <li>Share your referral link with fellow drivers</li>
+              <li>They sign up using your link</li>
+              <li>You both earn rewards when they complete jobs</li>
+            </ul>
+          </div>
+
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            setReferralLoading(true);
+            setReferralMessage("");
+
+            const normalizedPhone = normalizePhone(referralPhone);
+            if (normalizedPhone.length === 0) {
+              setReferralMessage("Please enter a valid phone number");
+              setReferralLoading(false);
+              return;
+            }
+
+            try {
+              // Call send-referral-sms edge function
+              const res = await fetch("https://zyoszbmahxnfcokuzkuv.supabase.co/functions/v1/send-referral-sms", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY", "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY" },
+                body: JSON.stringify({
+                  phone: `+1${normalizedPhone}`,
+                  referrerUsername: authUser.username,
+                  referralLink: referralUrl,
+                }),
+              });
+
+              const data = await res.json();
+              if (data.success) {
+                setReferralMessage(`✓ SMS sent to +1${normalizedPhone}!`);
+                setReferralPhone("+1 ");
+                setTimeout(() => { setShowReferral(false); setReferralMessage(""); }, 2500);
+              } else {
+                setReferralMessage(`Error: ${data.error || "Failed to send SMS"}`);
+              }
+            } catch (err) {
+              setReferralMessage("Error sending SMS. Please try again.");
+              console.error(err);
+            } finally {
+              setReferralLoading(false);
+            }
+          }}>
+            <div style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 8 }}>Or send via SMS</div>
+            <div style={{ display: "block", fontSize: 12, color: "#6b7590", marginBottom: 12 }}>Enter driver's phone to send them your referral link</div>
+            <input
+              type="tel"
+              value={referralPhone}
+              onChange={e => setReferralPhone(e.target.value)}
+              placeholder="e.g. +1 (416) 555-1234"
+              autoFocus
+              style={{ width: "100%", padding: "12px", borderRadius: 8, border: "1.5px solid #1f2d52", background: "#151d45", color: "#f5f7fb", fontSize: 14, boxSizing: "border-box", marginBottom: 12 }}
+            />
+            {referralMessage && <p style={{ color: referralMessage.includes("copied") || referralMessage.includes("sent") ? "#22c55e" : "#ef4444", fontSize: 12, margin: "0 0 12px", textAlign: "center" }}>{referralMessage}</p>}
+            <button
+              type="submit"
+              disabled={referralLoading}
+              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#e94560", color: "white", fontSize: 14, fontWeight: 600, border: "none", cursor: "pointer", opacity: referralLoading ? 0.6 : 1, marginBottom: 12 }}
+            >
+              {referralLoading ? "Sending..." : "Send Via SMS"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowReferral(false); setReferralMessage(""); setReferralPhone("+1 "); }}
+              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#151d45", color: "#9ca3b3", fontSize: 14, fontWeight: 600, border: "1px solid #1f2d52", cursor: "pointer" }}
+            >
+              Close
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   // ===== AUTH SCREENS (Login / Register / Forgot) =====
   if (!authUser) {
-    const inputStyle = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 15, marginBottom: 14, boxSizing: "border-box" as const };
-    const labelStyle = { display: "block" as const, fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 };
-    const btnStyle = { width: "100%", padding: "12px", borderRadius: 8, background: "#0d6efd", color: "white", fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer" };
-    const linkStyle = { color: "#0d6efd", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", fontSize: 13, padding: 0 };
+    const inputStyle = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1.5px solid #1f2d52", background: "#151d45", color: "#f5f7fb", fontSize: 15, marginBottom: 14, boxSizing: "border-box" as const };
+    const labelStyle = { display: "block" as const, fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 };
+    const btnStyle = { width: "100%", padding: "12px", borderRadius: 8, background: "#e94560", color: "white", fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer" };
+    const linkStyle = { color: "#e94560", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", fontSize: 13, padding: 0 };
 
     return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#f8f9fa", boxSizing: "border-box" }}>
-        <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 16, padding: "32px 24px", border: "1px solid #dee2e6", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#0a0e27", boxSizing: "border-box" }}>
+        <div style={{ width: "100%", maxWidth: 420, background: "#0f1535", borderRadius: 16, padding: "32px 24px", border: "1px solid #1f2d52", boxShadow: "0 24px 80px rgba(0,0,0,0.4)" }}>
           <div style={{ textAlign: "center", marginBottom: 28 }}>
-            <div style={{ fontSize: 36, fontWeight: 700, color: "#0d6efd", marginBottom: 4 }}>RIN</div>
+            <div style={{ fontSize: 36, fontWeight: 700, color: "#e94560", marginBottom: 4 }}>RIN</div>
             <div style={{ fontSize: 14, color: "#6c757d" }}>
               {authView === "login" && "Price Quote Tool — Sign In"}
               {authView === "register" && "Create Your Account"}
@@ -697,13 +863,11 @@ export default function App() {
           {/* === LOGIN === */}
           {authView === "login" && (
             <form onSubmit={handleLogin}>
-              <label style={labelStyle}>Username</label>
-              <input type="text" value={loginUsername} onChange={e => setLoginUsername(e.target.value)} placeholder="Enter your username" autoFocus style={inputStyle} />
-              <label style={labelStyle}>Password</label>
-              <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="Enter your password" style={inputStyle} />
+              <label style={labelStyle}>Phone Number</label>
+              <input type="tel" value={loginUsername} onChange={e => setLoginUsername(e.target.value)} placeholder="e.g. +1 (416) 555-1234" autoFocus style={inputStyle} />
               {loginError && <p style={{ color: "#dc3545", fontSize: 13, margin: "0 0 12px" }}>{loginError}</p>}
-              <button type="submit" disabled={loginLoading || !loginUsername || !loginPassword} style={{ ...btnStyle, opacity: loginLoading ? 0.6 : 1, marginBottom: 16 }}>
-                {loginLoading ? "Signing in..." : "Sign In"}
+              <button type="submit" disabled={loginLoading || !loginUsername} style={{ ...btnStyle, opacity: loginLoading ? 0.6 : 1, marginBottom: 16 }}>
+                {loginLoading ? "Sending code..." : "Send OTP Code"}
               </button>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <button type="button" onClick={() => { setAuthView("register"); setLoginError(""); }} style={linkStyle}>Create Account</button>
@@ -716,22 +880,31 @@ export default function App() {
           {authView === "register" && (
             <form onSubmit={handleRegister}>
               <label style={labelStyle}>Full Name *</label>
-              <input type="text" value={regFullName} onChange={e => setRegFullName(e.target.value)} placeholder="e.g. Abdul Hakim Hussein" autoFocus style={inputStyle} />
+              <input type="text" value={regFullName} onChange={e => { setRegFullName(e.target.value); if (regError) setRegError(""); }} placeholder="" autoFocus style={inputStyle} />
               <label style={labelStyle}>Phone Number *</label>
-              <input type="tel" value={regPhone} onChange={e => setRegPhone(e.target.value)} placeholder="+1 (647) 555-1234" style={inputStyle} />
-              <label style={labelStyle}>Username *</label>
-              <input type="text" value={regUsername} onChange={e => setRegUsername(e.target.value)} placeholder="Choose a username" style={inputStyle} />
+              <input type="tel" value={regPhone} onChange={e => { setRegPhone(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
+              <label style={labelStyle}>Operator Type *</label>
+              <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#f5f7fb", fontSize: 14 }}>
+                  <input type="radio" name="operatorType" checked={regIsIndependent === true} onChange={() => setRegIsIndependent(true)} style={{ cursor: "pointer" }} />
+                  Independent Operator
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#f5f7fb", fontSize: 14 }}>
+                  <input type="radio" name="operatorType" checked={regIsIndependent === false} onChange={() => setRegIsIndependent(false)} style={{ cursor: "pointer" }} />
+                  Fleet Operator
+                </label>
+              </div>
               <label style={labelStyle}>Email</label>
-              <input type="email" value={regEmail} onChange={e => setRegEmail(e.target.value)} placeholder="your@email.com (for password recovery)" style={inputStyle} />
+              <input type="email" value={regEmail} onChange={e => { setRegEmail(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
               <label style={labelStyle}>Company</label>
-              <input type="text" value={regCompany} onChange={e => setRegCompany(e.target.value)} placeholder="e.g. FastTow Toronto" style={inputStyle} />
-              <label style={labelStyle}>Password * <span style={{ fontWeight: 400, color: "#999" }}>(min 6 characters)</span></label>
-              <input type="password" value={regPassword} onChange={e => setRegPassword(e.target.value)} placeholder="Create a password" style={inputStyle} />
+              <input type="text" value={regCompany} onChange={e => { setRegCompany(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
+              <label style={labelStyle}>Password * <span style={{ fontWeight: 400, color: "#6b7590" }}>(min 6 characters)</span></label>
+              <input type="password" value={regPassword} onChange={e => { setRegPassword(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
               <label style={labelStyle}>Confirm Password *</label>
-              <input type="password" value={regConfirmPassword} onChange={e => setRegConfirmPassword(e.target.value)} placeholder="Re-enter your password" style={inputStyle} />
+              <input type="password" value={regConfirmPassword} onChange={e => { setRegConfirmPassword(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
               {regError && <p style={{ color: "#dc3545", fontSize: 13, margin: "0 0 12px" }}>{regError}</p>}
               {regSuccess && <p style={{ color: "#198754", fontSize: 13, margin: "0 0 12px", fontWeight: 600 }}>{regSuccess}</p>}
-              <button type="submit" disabled={regLoading} style={{ ...btnStyle, background: "#198754", opacity: regLoading ? 0.6 : 1, marginBottom: 16 }}>
+              <button type="submit" disabled={regLoading} style={{ ...btnStyle, background: "#22c55e", opacity: regLoading ? 0.6 : 1, marginBottom: 16 }}>
                 {regLoading ? "Creating Account..." : "Create Account"}
               </button>
               <div style={{ textAlign: "center" }}>
@@ -744,19 +917,17 @@ export default function App() {
           {authView === "forgot" && (
             <form onSubmit={handleForgotPassword}>
               <p style={{ fontSize: 13, color: "#6c757d", marginTop: 0, marginBottom: 16 }}>
-                Enter your username and the email address associated with your account to set a new password.
+                Enter your phone number to reset your password.
               </p>
-              <label style={labelStyle}>Username</label>
-              <input type="text" value={forgotUsername} onChange={e => setForgotUsername(e.target.value)} placeholder="Your username" autoFocus style={inputStyle} />
-              <label style={labelStyle}>Email Address</label>
-              <input type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} placeholder="Email used during registration" style={inputStyle} />
-              <label style={labelStyle}>New Password <span style={{ fontWeight: 400, color: "#999" }}>(min 6 characters)</span></label>
+              <label style={labelStyle}>Phone Number</label>
+              <input type="tel" value={forgotPhone} onChange={e => setForgotPhone(e.target.value)} placeholder="e.g. +1 (416) 555-1234" autoFocus style={inputStyle} />
+              <label style={labelStyle}>New Password <span style={{ fontWeight: 400, color: "#6b7590" }}>(min 6 characters)</span></label>
               <input type="password" value={forgotNewPassword} onChange={e => setForgotNewPassword(e.target.value)} placeholder="Choose a new password" style={inputStyle} />
               <label style={labelStyle}>Confirm New Password</label>
               <input type="password" value={forgotConfirmPassword} onChange={e => setForgotConfirmPassword(e.target.value)} placeholder="Re-enter new password" style={inputStyle} />
               {forgotError && <p style={{ color: "#dc3545", fontSize: 13, margin: "0 0 12px" }}>{forgotError}</p>}
               {forgotSuccess && <p style={{ color: "#198754", fontSize: 13, margin: "0 0 12px", fontWeight: 600 }}>{forgotSuccess}</p>}
-              <button type="submit" disabled={forgotLoading} style={{ ...btnStyle, background: "#fd7e14", opacity: forgotLoading ? 0.6 : 1, marginBottom: 16 }}>
+              <button type="submit" disabled={forgotLoading} style={{ ...btnStyle, background: "#f59e0b", opacity: forgotLoading ? 0.6 : 1, marginBottom: 16 }}>
                 {forgotLoading ? "Resetting..." : "Reset Password"}
               </button>
               <div style={{ textAlign: "center" }}>
@@ -779,18 +950,18 @@ export default function App() {
   // ===== DISCLAIMER POPUP =====
   if (showDisclaimer || !disclaimerAccepted) {
     return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "rgba(0,0,0,0.5)", boxSizing: "border-box" }}>
-        <div style={{ width: "100%", maxWidth: 600, maxHeight: "90vh", overflow: "auto", background: "#fff", borderRadius: 16, padding: "32px 24px", border: "1px solid #dee2e6", boxShadow: "0 8px 40px rgba(0,0,0,0.2)" }}>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "rgba(0,0,0,0.85)", boxSizing: "border-box" }}>
+        <div style={{ width: "100%", maxWidth: 600, maxHeight: "90vh", overflow: "auto", background: "#0f1535", borderRadius: 16, padding: "32px 24px", border: "1px solid #1f2d52", boxShadow: "0 24px 80px rgba(0,0,0,0.4)" }}>
           <div style={{ textAlign: "center", marginBottom: 24 }}>
-            <div style={{ fontSize: 28, fontWeight: 700, color: "#dc3545" }}>Disclaimer &amp; Terms of Use</div>
-            <p style={{ color: "#6c757d", fontSize: 13 }}>Please read carefully before proceeding</p>
+            <div style={{ fontSize: 28, fontWeight: 700, color: "#e94560" }}>Disclaimer &amp; Terms of Use</div>
+            <p style={{ color: "#9ca3b3", fontSize: 13 }}>Please read carefully before proceeding</p>
           </div>
 
-          <div style={{ background: "#f8f9fa", borderRadius: 8, padding: 20, fontSize: 13, lineHeight: 1.8, maxHeight: 400, overflow: "auto", border: "1px solid #dee2e6", marginBottom: 24 }}>
+          <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, padding: 20, fontSize: 13, lineHeight: 1.8, maxHeight: 400, overflow: "auto", border: "1px solid #1f2d52", marginBottom: 24, color: "#f5f7fb" }}>
             <p style={{ fontWeight: 700, fontSize: 15, marginTop: 0 }}>RIN PRICE QUOTE TOOL &mdash; TERMS OF USE &amp; PRIVACY NOTICE</p>
             <p style={{ fontWeight: 700 }}>Operated by Roadside Intelligence Network</p>
             <p>PO Box 69068, St. Clair Station, Toronto, Ontario M4T 1A3, Canada</p>
-            <p style={{ fontSize: 12, color: "#666" }}>Disclaimer Version 2.0 &mdash; Effective April 10, 2026</p>
+            <p style={{ fontSize: 12, color: "#9ca3b3" }}>Disclaimer Version 2.0 &mdash; Effective April 10, 2026</p>
 
             <p style={{ fontWeight: 700, marginTop: 16 }}>1. For Reference Only &mdash; Pricing Estimates</p>
             <p>All pricing information, estimates, and quotes generated by this tool are provided <strong>for reference and verification purposes only</strong>. They do not constitute a binding offer, contract, or guarantee of pricing for any roadside assistance service. Actual charges may vary based on real-time conditions, driver availability, vehicle condition, and on-scene assessment. Commission rates and driver payouts are internal figures and may not reflect final customer billing.</p>
@@ -843,19 +1014,19 @@ export default function App() {
           </div>
 
           <div style={{ textAlign: "center" }}>
-            <p style={{ fontSize: 14, fontWeight: 600, color: "#333", marginBottom: 16 }}>
-              Logged in as: <span style={{ color: "#0d6efd" }}>{authUser.full_name}</span> ({authUser.company})
+            <p style={{ fontSize: 14, fontWeight: 600, color: "#f5f7fb", marginBottom: 16 }}>
+              Logged in as: <span style={{ color: "#e94560" }}>{authUser.full_name}</span> ({authUser.company})
             </p>
             <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
               <button
                 onClick={handleLogout}
-                style={{ padding: "12px 32px", borderRadius: 8, background: "#f8f9fa", color: "#333", fontSize: 15, fontWeight: 600, border: "1px solid #dee2e6", cursor: "pointer", minWidth: 160 }}
+                style={{ padding: "12px 32px", borderRadius: 8, background: "#151d45", color: "#9ca3b3", fontSize: 15, fontWeight: 600, border: "1px solid #1f2d52", cursor: "pointer", minWidth: 160 }}
               >
                 Decline &amp; Logout
               </button>
               <button
                 onClick={handleDisclaimerAccept}
-                style={{ padding: "12px 32px", borderRadius: 8, background: "#198754", color: "white", fontSize: 15, fontWeight: 600, border: "none", cursor: "pointer", minWidth: 200 }}
+                style={{ padding: "12px 32px", borderRadius: 8, background: "#22c55e", color: "white", fontSize: 15, fontWeight: 600, border: "none", cursor: "pointer", minWidth: 200 }}
               >
                 I Agree to These Terms
               </button>
@@ -878,34 +1049,54 @@ export default function App() {
   const isLuxury = vehicleMake && LUXURY_MAKES.some(m => m.toLowerCase() === vehicleMake.toLowerCase());
 
   return (
-    <div className="pq-container" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#f8f9fa", minHeight: "100vh" }}>
+    <div className="pq-container" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#0a0e27", minHeight: "100vh" }}>
       <style>{MOBILE_STYLES}</style>
       {/* Header */}
-      <div className="pq-header" style={{ background: "#0d6efd", color: "white", padding: "20px 24px", borderRadius: 12, marginBottom: 24 }}>
+      <div className="pq-header" style={{ background: "#e94560", color: "white", padding: "20px 24px", borderRadius: 12, marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 28 }}>RIN Price Quote Tool</h1>
           <p style={{ margin: "8px 0 0", opacity: 0.85, fontSize: 14 }}>
             Logged in as <strong>{authUser.full_name}</strong> ({authUser.company})
         </p>
         </div>
-        <button
-          onClick={handleLogout}
-          style={{ padding: "8px 20px", borderRadius: 8, background: "rgba(255,255,255,0.2)", color: "white", fontSize: 13, fontWeight: 600, border: "1px solid rgba(255,255,255,0.3)", cursor: "pointer" }}
-        >
-          Logout
-        </button>
+        <div style={{ display: "flex", gap: 12 }}>
+          <button
+            onClick={() => setShowReferral(true)}
+            style={{ padding: "10px 20px", borderRadius: 8, background: "#22c55e", color: "white", fontSize: 13, fontWeight: 700, border: "none", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(34, 197, 86, 0.4)", transition: "all 0.2s ease" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#16a34a"; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 16px rgba(34, 197, 86, 0.5)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#22c55e"; e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(34, 197, 86, 0.4)"; }}
+          >
+            Refer a Driver
+          </button>
+          <a
+            href="https://drive-my-own.netlify.app/"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ padding: "10px 20px", borderRadius: 8, background: "#3b82f6", color: "white", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", textDecoration: "none", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", transition: "all 0.2s ease", boxShadow: "0 4px 12px rgba(59, 130, 246, 0.4)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#2563eb"; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 16px rgba(59, 130, 246, 0.5)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#3b82f6"; e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(59, 130, 246, 0.4)"; }}
+          >
+            Become a Driver
+          </a>
+          <button
+            onClick={handleLogout}
+            style={{ padding: "8px 20px", borderRadius: 8, background: "rgba(255,255,255,0.2)", color: "white", fontSize: 13, fontWeight: 600, border: "1px solid rgba(255,255,255,0.3)", cursor: "pointer" }}
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
       <div className="pq-grid">
         {/* Left: Inputs */}
-        <div style={{ background: "#fff", borderRadius: 12, padding: 20, border: "1px solid #dee2e6" }}>
-          <h2 style={{ marginTop: 0, fontSize: 18, color: "#333" }}>Job Details</h2>
+        <div style={{ background: "#0f1535", borderRadius: 12, padding: 20, border: "1px solid #1f2d52" }}>
+          <h2 style={{ marginTop: 0, fontSize: 18, color: "#f5f7fb" }}>Job Details</h2>
 
-          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Service Type</label>
+          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>Service Type</label>
           <select
             value={selectedIncident}
             onChange={e => setSelectedIncident(e.target.value)}
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 15, marginBottom: 16 }}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #1f2d52", fontSize: 15, marginBottom: 16, background: "#151d45", color: "#f5f7fb" }}
           >
             {pricingConfigs.map(c => (
               <option key={c.incident_type_id} value={c.incident_type_id}>
@@ -914,8 +1105,8 @@ export default function App() {
             ))}
           </select>
 
-          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>
-            Distance: <strong style={{ color: "#0d6efd" }}>{distance} km</strong>
+          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>
+            Distance: <strong style={{ color: "#e94560" }}>{distance} km</strong>
           </label>
           <input
             type="range"
@@ -925,15 +1116,15 @@ export default function App() {
             onChange={e => setDistance(parseInt(e.target.value))}
             style={{ width: "100%", marginBottom: 4 }}
           />
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#999", marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b7590", marginBottom: 16 }}>
             <span>1 km</span><span>25 km</span><span>50 km</span><span>75 km</span><span>100 km</span>
           </div>
 
-          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Vehicle Make</label>
+          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>Vehicle Make</label>
           <select
             value={vehicleMake}
             onChange={e => setVehicleMake(e.target.value)}
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: `1px solid ${isLuxury ? "#dc3545" : "#ced4da"}`, fontSize: 15, marginBottom: 4, background: isLuxury ? "#fff5f5" : "#fff" }}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: `1px solid ${isLuxury ? "#dc3545" : "#1f2d52"}`, fontSize: 15, marginBottom: 4, background: isLuxury ? "rgba(220,53,69,0.1)" : "#151d45", color: "#f5f7fb" }}
           >
             <option value="">-- No vehicle selected --</option>
             <optgroup label="Standard Vehicles">
@@ -954,11 +1145,11 @@ export default function App() {
           )}
           {!isLuxury && <div style={{ marginBottom: 16 }} />}
 
-          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Time of Day</label>
+          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>Time of Day</label>
           <select
             value={timeOfDay}
             onChange={e => setTimeOfDay(e.target.value)}
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 15, marginBottom: 16 }}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #1f2d52", fontSize: 15, marginBottom: 16, background: "#151d45", color: "#f5f7fb" }}
           >
             <option value="standard">Standard (9am-4pm) &mdash; 1.00x</option>
             <option value="early_morning">Early Morning (6-7am) &mdash; 1.15x</option>
@@ -967,22 +1158,22 @@ export default function App() {
             <option value="night">Night (9pm-6am) &mdash; 1.40x</option>
           </select>
 
-          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Pickup Location</label>
+          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>Pickup Location</label>
           <input
             type="text"
             value={pickupLocation}
             onChange={e => setPickupLocation(e.target.value)}
             placeholder="e.g. 401 & Keele St, Toronto"
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 15, marginBottom: 14, boxSizing: "border-box" }}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #1f2d52", fontSize: 15, marginBottom: 14, boxSizing: "border-box", background: "#151d45", color: "#f5f7fb" }}
           />
 
-          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#495057", marginBottom: 4 }}>Notes</label>
+          <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>Notes</label>
           <textarea
             value={notes}
             onChange={e => setNotes(e.target.value)}
             placeholder="e.g. Vehicle in underground parking, no keys..."
             rows={2}
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ced4da", fontSize: 15, marginBottom: 16, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #1f2d52", fontSize: 15, marginBottom: 16, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit", background: "#151d45", color: "#f5f7fb" }}
           />
 
           <button
@@ -996,13 +1187,13 @@ export default function App() {
         </div>
 
         {/* Right: Quote Result */}
-        <div style={{ background: "#fff", borderRadius: 12, padding: 20, border: "1px solid #dee2e6" }}>
-          <h2 style={{ marginTop: 0, fontSize: 18, color: "#333" }}>Price Breakdown</h2>
+        <div style={{ background: "#0f1535", borderRadius: 12, padding: 20, border: "1px solid #1f2d52" }}>
+          <h2 style={{ marginTop: 0, fontSize: 18, color: "#f5f7fb" }}>Price Breakdown</h2>
 
           {quote && (
             <>
               {/* Final Price */}
-              <div style={{ background: "#0d6efd", color: "white", borderRadius: 10, padding: "20px 24px", marginBottom: 20, textAlign: "center" }}>
+              <div style={{ background: "#e94560", color: "white", borderRadius: 10, padding: "20px 24px", marginBottom: 20, textAlign: "center" }}>
                 <div style={{ fontSize: 42, fontWeight: 700 }}>${quote.final_price.toFixed(2)}</div>
                 <div style={{ fontSize: 13, opacity: 0.85 }}>Estimated Price ({selectedConfig?.incident_name})</div>
               </div>
@@ -1010,11 +1201,11 @@ export default function App() {
               {/* Line items */}
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                 <tbody>
-                  <tr style={{ borderBottom: "1px solid #eee" }}>
-                    <td style={{ padding: "8px 0", color: "#666" }}>Base Rate</td>
+                  <tr style={{ borderBottom: "1px solid #1f2d52" }}>
+                    <td style={{ padding: "8px 0", color: "#9ca3b3" }}>Base Rate</td>
                     <td style={{ padding: "8px 0", textAlign: "right", fontWeight: 600 }}>
                       {quote.base_rate_overridden ? (
-                        <><span style={{ textDecoration: "line-through", color: "#999", marginRight: 8 }}>${quote.original_base.toFixed(2)}</span>${quote.base_rate.toFixed(2)} <span style={{ fontSize: 11, color: "#dc3545" }}>(long dist.)</span></>
+                        <><span style={{ textDecoration: "line-through", color: "#6b7590", marginRight: 8 }}>${quote.original_base.toFixed(2)}</span>${quote.base_rate.toFixed(2)} <span style={{ fontSize: 11, color: "#dc3545" }}>(long dist.)</span></>
                       ) : (
                         `$${quote.base_rate.toFixed(2)}`
                       )}
@@ -1023,51 +1214,51 @@ export default function App() {
 
                   {/* Distance tiers */}
                   {quote.tier_breakdown.map((t, i) => (
-                    <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
-                      <td style={{ padding: "8px 0", color: "#666", paddingLeft: i === 0 ? 0 : 16 }}>
-                        {i === 0 ? "Distance" : ""} <span style={{ fontSize: 12, color: "#999" }}>{t.tier} ({t.km}km x ${t.rate})</span>
+                    <tr key={i} style={{ borderBottom: "1px solid #1f2d52" }}>
+                      <td style={{ padding: "8px 0", color: "#9ca3b3", paddingLeft: i === 0 ? 0 : 16 }}>
+                        {i === 0 ? "Distance" : ""} <span style={{ fontSize: 12, color: "#6b7590" }}>{t.tier} ({t.km}km x ${t.rate})</span>
                       </td>
-                      <td style={{ padding: "8px 0", textAlign: "right", fontWeight: 600 }}>${t.charge.toFixed(2)}</td>
+                      <td style={{ padding: "8px 0", textAlign: "right", fontWeight: 600, color: "#f5f7fb" }}>${t.charge.toFixed(2)}</td>
                     </tr>
                   ))}
 
-                  <tr style={{ borderBottom: "1px solid #eee" }}>
-                    <td style={{ padding: "8px 0", color: "#666" }}>Distance Total ({quote.distance_km}km)</td>
-                    <td style={{ padding: "8px 0", textAlign: "right", fontWeight: 600 }}>${quote.distance_charge.toFixed(2)}</td>
+                  <tr style={{ borderBottom: "1px solid #1f2d52" }}>
+                    <td style={{ padding: "8px 0", color: "#9ca3b3" }}>Distance Total ({quote.distance_km}km)</td>
+                    <td style={{ padding: "8px 0", textAlign: "right", fontWeight: 600, color: "#f5f7fb" }}>${quote.distance_charge.toFixed(2)}</td>
                   </tr>
 
                   {quote.luxury_surcharge > 0 && (
-                    <tr style={{ borderBottom: "1px solid #eee" }}>
+                    <tr style={{ borderBottom: "1px solid #1f2d52" }}>
                       <td style={{ padding: "8px 0", color: "#dc3545" }}>Luxury Surcharge (25%)</td>
                       <td style={{ padding: "8px 0", textAlign: "right", fontWeight: 600, color: "#dc3545" }}>+${quote.luxury_surcharge.toFixed(2)}</td>
                     </tr>
                   )}
 
                   {quote.time_multiplier !== 1.0 && (
-                    <tr style={{ borderBottom: "1px solid #eee" }}>
-                      <td style={{ padding: "8px 0", color: "#fd7e14" }}>Time Multiplier ({quote.time_period})</td>
-                      <td style={{ padding: "8px 0", textAlign: "right", fontWeight: 600, color: "#fd7e14" }}>x{quote.time_multiplier.toFixed(2)}</td>
+                    <tr style={{ borderBottom: "1px solid #1f2d52" }}>
+                      <td style={{ padding: "8px 0", color: "#f59e0b" }}>Time Multiplier ({quote.time_period})</td>
+                      <td style={{ padding: "8px 0", textAlign: "right", fontWeight: 600, color: "#f59e0b" }}>x{quote.time_multiplier.toFixed(2)}</td>
                     </tr>
                   )}
 
-                  <tr style={{ borderTop: "2px solid #333" }}>
-                    <td style={{ padding: "12px 0", fontWeight: 700, fontSize: 16 }}>Total</td>
-                    <td style={{ padding: "12px 0", textAlign: "right", fontWeight: 700, fontSize: 16 }}>${quote.final_price.toFixed(2)}</td>
+                  <tr style={{ borderTop: "2px solid #e94560" }}>
+                    <td style={{ padding: "12px 0", fontWeight: 700, fontSize: 16, color: "#f5f7fb" }}>Total</td>
+                    <td style={{ padding: "12px 0", textAlign: "right", fontWeight: 700, fontSize: 16, color: "#f5f7fb" }}>${quote.final_price.toFixed(2)}</td>
                   </tr>
 
-                  <tr style={{ borderBottom: "1px solid #eee" }}>
-                    <td style={{ padding: "6px 0", color: "#999", fontSize: 12 }}>Cancellation Fee (50%)</td>
-                    <td style={{ padding: "6px 0", textAlign: "right", color: "#999", fontSize: 12 }}>${quote.cancellation_fee.toFixed(2)}</td>
+                  <tr style={{ borderBottom: "1px solid #1f2d52" }}>
+                    <td style={{ padding: "6px 0", color: "#6b7590", fontSize: 12 }}>Cancellation Fee (50%)</td>
+                    <td style={{ padding: "6px 0", textAlign: "right", color: "#6b7590", fontSize: 12 }}>${quote.cancellation_fee.toFixed(2)}</td>
                   </tr>
                   <tr>
-                    <td style={{ padding: "6px 0", color: "#999", fontSize: 12 }}>Minimum Fee</td>
-                    <td style={{ padding: "6px 0", textAlign: "right", color: "#999", fontSize: 12 }}>${quote.min_fee.toFixed(2)}</td>
+                    <td style={{ padding: "6px 0", color: "#6b7590", fontSize: 12 }}>Minimum Fee</td>
+                    <td style={{ padding: "6px 0", textAlign: "right", color: "#6b7590", fontSize: 12 }}>${quote.min_fee.toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
 
               {/* Formula */}
-              <div style={{ marginTop: 20, background: "#f1f3f5", borderRadius: 8, padding: 16, fontSize: 13, fontFamily: "monospace" }}>
+              <div style={{ marginTop: 20, background: "#151d45", borderRadius: 8, padding: 16, fontSize: 13, fontFamily: "monospace", color: "#f5f7fb", border: "1px solid #1f2d52" }}>
                 <strong>Formula:</strong><br />
                 ({quote.base_rate_overridden ? `$${quote.base_rate} override` : `$${quote.base_rate} base`}
                 {" + "}${quote.distance_charge} distance
@@ -1078,22 +1269,22 @@ export default function App() {
               </div>
 
               {/* Send Quote via SMS */}
-              <div style={{ marginTop: 16, padding: "14px 0 0", borderTop: "1px solid #eee" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#333", marginBottom: 8 }}>Send Quote to Customer</div>
+              <div style={{ marginTop: 16, padding: "14px 0 0", borderTop: "1px solid #1f2d52" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#f5f7fb", marginBottom: 8 }}>Send Quote to Customer</div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <div style={{ width: 40, padding: "8px 0", textAlign: "center", fontSize: 13, color: "#999", border: "1px solid #ced4da", borderRadius: "8px 0 0 8px", background: "#f8f9fa" }}>+1</div>
+                  <div style={{ width: 40, padding: "8px 0", textAlign: "center", fontSize: 13, color: "#6b7590", border: "1px solid #1f2d52", borderRadius: "8px 0 0 8px", background: "#151d45" }}>+1</div>
                   <input
                     type="tel"
                     value={smsPhone}
                     onChange={e => setSmsPhone(e.target.value.replace(/\D/g, ''))}
                     placeholder="6475551234"
                     maxLength={10}
-                    style={{ flex: 1, padding: "8px 10px", borderRadius: "0 8px 8px 0", border: "1px solid #ced4da", fontSize: 14, boxSizing: "border-box" }}
+                    style={{ flex: 1, padding: "8px 10px", borderRadius: "0 8px 8px 0", border: "1px solid #1f2d52", fontSize: 14, boxSizing: "border-box", background: "#151d45", color: "#f5f7fb" }}
                   />
                   <button
                     onClick={sendQuoteSms}
                     disabled={smsSending || smsPhone.length !== 10}
-                    style={{ padding: "8px 16px", borderRadius: 8, background: smsSending ? "#6c757d" : "#198754", color: "white", fontSize: 13, fontWeight: 600, border: "none", cursor: smsSending ? "default" : "pointer", whiteSpace: "nowrap" }}
+                    style={{ padding: "8px 16px", borderRadius: 8, background: smsSending ? "#6c757d" : "#22c55e", color: "white", fontSize: 13, fontWeight: 600, border: "none", cursor: smsSending ? "default" : "pointer", whiteSpace: "nowrap" }}
                   >
                     {smsSending ? "Sending..." : "Send SMS"}
                   </button>
@@ -1111,20 +1302,20 @@ export default function App() {
 
       {/* AI Agent Result */}
       {aiResult && (
-        <div style={{ marginTop: 24, background: "#fff", borderRadius: 12, padding: 20, border: "2px solid #7c3aed" }}>
+        <div style={{ marginTop: 24, background: "#fff", borderRadius: 12, padding: 20, border: "2px solid #e94560" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h2 style={{ margin: 0, fontSize: 18, color: "#7c3aed" }}>AI Agent Quote</h2>
+            <h2 style={{ margin: 0, fontSize: 18, color: "#e94560" }}>AI Agent Quote</h2>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 12, background: aiResult.tier === "tools" ? "#7c3aed" : "#0d6efd", color: "white", fontWeight: 600 }}>
+              <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 12, background: aiResult.tier === "tools" ? "#e94560" : "#22c55e", color: "white", fontWeight: 600 }}>
                 {aiResult.tier === "tools" ? "Deep Reasoning" : "Fast Quote"}
               </span>
               {aiResult.escalated && (
-                <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 12, background: "#fd7e14", color: "white", fontWeight: 600 }}>
+                <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 12, background: "#f59e0b", color: "white", fontWeight: 600 }}>
                   Escalated
                 </span>
               )}
               {aiResult.duration_ms && (
-                <span style={{ fontSize: 11, color: "#999" }}>{(aiResult.duration_ms / 1000).toFixed(1)}s</span>
+                <span style={{ fontSize: 11, color: "#6b7590" }}>{(aiResult.duration_ms / 1000).toFixed(1)}s</span>
               )}
             </div>
           </div>
@@ -1141,7 +1332,7 @@ export default function App() {
             return (
               <>
                 {price && (
-                  <div style={{ background: "#7c3aed", color: "white", borderRadius: 10, padding: "16px 20px", marginBottom: 16, textAlign: "center" }}>
+                  <div style={{ background: "#e94560", color: "white", borderRadius: 10, padding: "16px 20px", marginBottom: 16, textAlign: "center" }}>
                     <div style={{ fontSize: 36, fontWeight: 700 }}>${Number(price).toFixed(2)}</div>
                     <div style={{ fontSize: 12, opacity: 0.85 }}>
                       AI Agent Price
@@ -1156,9 +1347,9 @@ export default function App() {
                     <strong>Formula: ${quote.final_price.toFixed(2)}</strong> vs <strong>AI: ${Number(price).toFixed(2)}</strong>
                     {" "}&mdash;{" "}
                     {Math.abs(price - quote.final_price) < 1 ? (
-                      <span style={{ color: "#198754" }}>Prices match</span>
+                      <span style={{ color: "#22c55e" }}>Prices match</span>
                     ) : (
-                      <span style={{ color: "#fd7e14" }}>
+                      <span style={{ color: "#f59e0b" }}>
                         Difference: ${Math.abs(price - quote.final_price).toFixed(2)}
                         {" "}({price > quote.final_price ? "AI higher" : "Formula higher"})
                       </span>
@@ -1183,7 +1374,7 @@ export default function App() {
                   <div style={{ marginBottom: 12 }}>
                     <strong style={{ fontSize: 13 }}>Distance Breakdown:</strong>
                     {tierBreakdown.map((t: any, i: number) => (
-                      <div key={i} style={{ fontSize: 13, color: "#666", padding: "2px 0", paddingLeft: 12 }}>
+                      <div key={i} style={{ fontSize: 13, color: "#9ca3b3", padding: "2px 0", paddingLeft: 12 }}>
                         {t.tier}: {t.km}km x ${t.rate}/km = ${Number(t.charge).toFixed(2)}
                       </div>
                     ))}
@@ -1192,7 +1383,7 @@ export default function App() {
 
                 {/* Reasoning */}
                 {reasoning && (
-                  <div style={{ background: "#f8f9fa", borderRadius: 8, padding: 14, fontSize: 13, lineHeight: 1.6, marginBottom: 12, maxHeight: 200, overflow: "auto" }}>
+                  <div style={{ background: "#151d45", borderRadius: 8, padding: 14, fontSize: 13, lineHeight: 1.6, marginBottom: 12, maxHeight: 200, overflow: "auto" }}>
                     <strong>AI Reasoning:</strong><br />
                     {reasoning}
                   </div>
@@ -1200,14 +1391,14 @@ export default function App() {
 
                 {/* Tools used */}
                 {toolsUsed.length > 0 && (
-                  <div style={{ fontSize: 11, color: "#999" }}>
+                  <div style={{ fontSize: 11, color: "#6b7590" }}>
                     Tools used: {toolsUsed.join(", ")}
                   </div>
                 )}
 
                 {/* Escalation reason */}
                 {aiResult.escalation_reason && (
-                  <div style={{ fontSize: 11, color: "#fd7e14", marginTop: 4 }}>
+                  <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 4 }}>
                     Escalation: {aiResult.escalation_reason}
                   </div>
                 )}
@@ -1221,7 +1412,7 @@ export default function App() {
       <div style={{ marginTop: 24, textAlign: "center" }}>
         <button
           onClick={() => setShowReference(!showReference)}
-          style={{ padding: "10px 24px", borderRadius: 8, background: showReference ? "#6c757d" : "#fff", color: showReference ? "#fff" : "#495057", fontSize: 14, fontWeight: 600, border: "1px solid #dee2e6", cursor: "pointer" }}
+          style={{ padding: "10px 24px", borderRadius: 8, background: showReference ? "#e94560" : "#fff", color: showReference ? "#fff" : "#495057", fontSize: 14, fontWeight: 600, border: `1px solid ${showReference ? "#e94560" : "#dee2e6"}`, cursor: "pointer" }}
         >
           {showReference ? "Hide Reference Tables" : "View Reference Tables"}
         </button>
@@ -1229,7 +1420,7 @@ export default function App() {
 
       {showReference && (
       <div className="pq-ref-table" style={{ marginTop: 16, background: "#fff", borderRadius: 12, padding: 20, border: "1px solid #dee2e6" }}>
-        <h2 style={{ marginTop: 0, fontSize: 18, color: "#333" }}>Reference: All Pricing Data</h2>
+        <h2 style={{ marginTop: 0, fontSize: 18, color: "#f5f7fb" }}>Reference: All Pricing Data</h2>
 
         <h3 style={{ fontSize: 15, color: "#495057" }}>Service Types &amp; Base Rates</h3>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -1244,7 +1435,7 @@ export default function App() {
           </thead>
           <tbody>
             {pricingConfigs.map(c => (
-              <tr key={c.incident_type_id} style={{ borderBottom: "1px solid #eee" }}>
+              <tr key={c.incident_type_id} style={{ borderBottom: "1px solid #1f2d52" }}>
                 <td style={{ padding: "6px 10px" }}>{c.incident_name}</td>
                 <td style={{ padding: "6px 10px", textAlign: "right" }}>${c.base_rate.toFixed(2)}</td>
                 <td style={{ padding: "6px 10px", textAlign: "right" }}>${c.per_km_rate.toFixed(2)}</td>
@@ -1266,7 +1457,7 @@ export default function App() {
           </thead>
           <tbody>
             {distanceTiers.map(t => (
-              <tr key={t.tier_name} style={{ borderBottom: "1px solid #eee" }}>
+              <tr key={t.tier_name} style={{ borderBottom: "1px solid #1f2d52" }}>
                 <td style={{ padding: "6px 10px" }}>{t.tier_name}</td>
                 <td style={{ padding: "6px 10px", textAlign: "right" }}>{t.min_km} &ndash; {t.max_km ? `${t.max_km} km` : "unlimited"}</td>
                 <td style={{ padding: "6px 10px", textAlign: "right" }}>${t.per_km_rate.toFixed(2)}/km</td>
@@ -1286,7 +1477,7 @@ export default function App() {
           </thead>
           <tbody>
             {multipliers.sort((a, b) => a.multiplier - b.multiplier).map(m => (
-              <tr key={m.name} style={{ borderBottom: "1px solid #eee" }}>
+              <tr key={m.name} style={{ borderBottom: "1px solid #1f2d52" }}>
                 <td style={{ padding: "6px 10px" }}>{m.name.replace(/_/g, " ")}</td>
                 <td style={{ padding: "6px 10px", textAlign: "right" }}>{m.start_hour}:00 &ndash; {m.end_hour}:00</td>
                 <td style={{ padding: "6px 10px", textAlign: "right" }}>{m.multiplier.toFixed(2)}x</td>
@@ -1308,7 +1499,7 @@ export default function App() {
             {overrides.map((o, i) => {
               const config = pricingConfigs.find(c => c.incident_type_id === o.incident_type_id);
               return (
-                <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
+                <tr key={i} style={{ borderBottom: "1px solid #1f2d52" }}>
                   <td style={{ padding: "6px 10px" }}>{config?.incident_name || "Unknown"}</td>
                   <td style={{ padding: "6px 10px", textAlign: "right" }}>&gt; {o.min_distance_km} km</td>
                   <td style={{ padding: "6px 10px", textAlign: "right" }}>${o.base_rate_override.toFixed(2)}</td>
@@ -1320,9 +1511,8 @@ export default function App() {
       </div>
       )}
 
-      <footer style={{ marginTop: 32, textAlign: "center", color: "#999", fontSize: 12, padding: 16 }}>
-        RIN Roadside Intelligence Network &mdash; Private Pricing Verification Tool<br />
-        Data loaded live from Supabase &mdash; Last refreshed on page load
+      <footer style={{ marginTop: 32, textAlign: "center", color: "#6b7590", fontSize: 11, padding: 16, lineHeight: 1.6 }}>
+        <strong style={{ color: "#9ca3b3" }}>DISCLAIMER:</strong> This pricing tool is provided for reference purposes only and does not constitute an official quotation, binding agreement, or contractual offer. Roadside Intelligence Network makes no representation regarding the accuracy, completeness, or reliability of any pricing estimates generated. Users accept full responsibility for all decisions made based on information from this tool. Roadside Intelligence Network disclaims all liability arising from reliance on any pricing data or estimates provided herein.
       </footer>
     </div>
   );
