@@ -331,7 +331,7 @@ export default function App() {
 
     setPendingAuthUser(tempUser);
     setOtpMaskedPhone((data as any).phone);
-    setTestOtpCode((data as any).code || "");
+    setTestOtpCode(""); // Disabled in production
     setShowOtp(true);
     setLoginLoading(false);
   }
@@ -782,13 +782,14 @@ if (showLogoutConfirm) {
             <div style={{ fontSize: 12, color: "#6b7590", marginTop: 4 }}>Check your SMS for the 6-digit code</div>
           </div>
 
+{/* TEST CODE - DEVELOPMENT ONLY
           {testOtpCode && (
             <div style={{ background: "rgba(34, 197, 86, 0.08)", borderRadius: 8, padding: 12, marginBottom: 16, textAlign: "center", border: "1px solid rgba(34, 197, 86, 0.25)" }}>
               <div style={{ fontSize: 11, color: "#6b7590", marginBottom: 6, fontWeight: 600, letterSpacing: 0.5 }}>TEST CODE (Development Only)</div>
               <div style={{ fontSize: 24, fontWeight: 700, color: "#22c55e", letterSpacing: 4 }}>{testOtpCode}</div>
             </div>
           )}
-
+*/}
           <form onSubmit={handleVerifyOtp}>
             <div style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>Enter 6-Digit Code</div>
             <input
@@ -837,14 +838,14 @@ if (showLogoutConfirm) {
             <div style={{ fontSize: 16, fontWeight: 600, color: "#e94560", marginTop: 4 }}>{regOtpMasked}</div>
             <div style={{ fontSize: 12, color: "#6b7590", marginTop: 4 }}>Check your SMS for the 6-digit code</div>
           </div>
-
+{/* Test Code - Development only
           {regTestOtpCode && (
             <div style={{ background: "rgba(34, 197, 86, 0.08)", borderRadius: 8, padding: 12, marginBottom: 16, textAlign: "center", border: "1px solid rgba(34, 197, 86, 0.25)" }}>
               <div style={{ fontSize: 11, color: "#6b7590", marginBottom: 6, fontWeight: 600, letterSpacing: 0.5 }}>TEST CODE (Development Only)</div>
               <div style={{ fontSize: 24, fontWeight: 700, color: "#22c55e", letterSpacing: 4 }}>{regTestOtpCode}</div>
             </div>
           )}
-
+*/}
           <form onSubmit={handleCompleteRegistration}>
             <div style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>Enter 6-Digit Code</div>
             <input
