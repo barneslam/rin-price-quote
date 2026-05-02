@@ -176,11 +176,17 @@ export default function App() {
   const [regFullName, setRegFullName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regCompany, setRegCompany] = useState("");
-  const [regPhone, setRegPhone] = useState("+1 ");
-  const [regIsIndependent, setRegIsIndependent] = useState(true);
+  const [regPhone, setRegPhone] = useState("");
+  const [regIsIndependent, setRegIsIndependent] = useState<boolean | null>(null);
   const [regError, setRegError] = useState("");
   const [regSuccess, setRegSuccess] = useState("");
+  const [showRegThankYou, setShowRegThankYou] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
+  const [showRegOtp, setShowRegOtp] = useState(false);
+  const [regOtpCode, setRegOtpCode] = useState("");
+  const [regOtpMasked, setRegOtpMasked] = useState("");
+  const [regTestOtpCode, setRegTestOtpCode] = useState(""); // Only populated in dev/fallback
+  const [pendingRegPhone, setPendingRegPhone] = useState("");
 
   // Forgot password state
   const [forgotPhone, setForgotPhone] = useState("+1 ");
@@ -393,29 +399,79 @@ export default function App() {
       return;
     }
 
-    setRegLoading(true);
-    const { data, error } = await supabase.rpc("register_quote_driver", {
-      p_username: regPhone.trim(),  // Phone is the unique identifier
-      p_password: regPassword,
-      p_full_name: regFullName.trim(),
-      p_email: regEmail.toLowerCase().trim(),
-      p_company: regCompany.trim(),
-      p_phone: regPhone.trim(),
-    });
+    const normalizedPhone = normalizePhone(regPhone);
+    if (normalizedPhone.length === 0) {
+      setRegError("Please enter a valid phone number");
+      return;
+    }
 
-    if (error || !data || !(data as any).success) {
-      setRegError((data as any)?.error || error?.message || "Registration failed");
+    setRegLoading(true);
+
+    // Call edge function to generate OTP and send SMS
+    const edgeRes = await fetch(
+      "https://zyoszbmahxnfcokuzkuv.supabase.co/functions/v1/send-registration-otp",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY",
+        },
+        body: JSON.stringify({ phone: normalizedPhone }),
+      }
+    );
+
+    const edgeData = await edgeRes.json();
+    setRegLoading(false);
+
+    if (!edgeRes.ok || !edgeData.success) {
+      setRegError(edgeData.error || "Failed to send verification code");
+      return;
+    }
+
+    setPendingRegPhone(normalizedPhone);
+    setRegOtpMasked(edgeData.phone_masked || `+1 *** *** ${normalizedPhone.slice(-4)}`);
+    setRegTestOtpCode(""); // No test code in production
+    setShowRegOtp(true);
+  }
+
+  async function handleCompleteRegistration(e: React.FormEvent) {
+    e.preventDefault();
+    setRegError("");
+    setRegLoading(true);
+
+    // 1. Verify OTP server-side
+    const { data: otpData, error: otpError } = await supabase.rpc("verify_registration_otp", {
+      p_phone: pendingRegPhone,
+      p_code: regOtpCode.trim(),
+    });
+    const otpResult = Array.isArray(otpData) ? otpData[0] : otpData;
+    if (otpError || !otpResult?.success) {
+      setRegError(otpResult?.error || otpError?.message || "Invalid verification code");
       setRegLoading(false);
       return;
     }
 
-    setRegSuccess("Account created! You can now sign in.");
+    // 2. Create account
+    const { data, error } = await supabase.rpc("register_quote_driver", {
+      p_username: pendingRegPhone,
+      p_password: regPassword,
+      p_full_name: regFullName.trim(),
+      p_email: regEmail.toLowerCase().trim(),
+      p_company: regCompany.trim(),
+      p_phone: pendingRegPhone,
+    });
+
     setRegLoading(false);
-    setTimeout(() => {
-      setAuthView("login");
-      setLoginUsername(regPhone.trim());
-      setRegSuccess("");
-    }, 2000);
+
+    if (error || !data || !(data as any).success) {
+      setRegError((data as any)?.error || error?.message || "Registration failed");
+      setShowRegOtp(false);
+      return;
+    }
+
+    setShowRegOtp(false);
+    setRegOtpCode("");
+    setShowRegThankYou(true);
   }
 
   async function handleForgotPassword(e: React.FormEvent) {
@@ -735,6 +791,94 @@ export default function App() {
     );
   }
 
+  // ===== REGISTRATION OTP VERIFICATION =====
+  if (showRegOtp && !authUser) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#0a0e27", boxSizing: "border-box" }}>
+        <div style={{ width: "100%", maxWidth: 420, background: "#0f1535", borderRadius: 16, padding: "32px 24px", border: "1px solid #1f2d52", boxShadow: "0 24px 80px rgba(0,0,0,0.4)" }}>
+          <div style={{ textAlign: "center", marginBottom: 28 }}>
+            <div style={{ fontSize: 36, fontWeight: 700, color: "#e94560", marginBottom: 4 }}>RIN</div>
+            <div style={{ fontSize: 14, color: "#9ca3b3" }}>Verify Your Phone Number</div>
+          </div>
+
+          <div style={{ background: "rgba(233, 69, 96, 0.08)", borderRadius: 8, padding: 16, textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 13, color: "#9ca3b3" }}>Verification code sent to</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#e94560", marginTop: 4 }}>{regOtpMasked}</div>
+            <div style={{ fontSize: 12, color: "#6b7590", marginTop: 4 }}>Check your SMS for the 6-digit code</div>
+          </div>
+
+          {regTestOtpCode && (
+            <div style={{ background: "rgba(34, 197, 86, 0.08)", borderRadius: 8, padding: 12, marginBottom: 16, textAlign: "center", border: "1px solid rgba(34, 197, 86, 0.25)" }}>
+              <div style={{ fontSize: 11, color: "#6b7590", marginBottom: 6, fontWeight: 600, letterSpacing: 0.5 }}>TEST CODE (Development Only)</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "#22c55e", letterSpacing: 4 }}>{regTestOtpCode}</div>
+            </div>
+          )}
+
+          <form onSubmit={handleCompleteRegistration}>
+            <div style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#9ca3b3", marginBottom: 4 }}>Enter 6-Digit Code</div>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={regOtpCode}
+              onChange={e => setRegOtpCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="000000"
+              autoFocus
+              style={{ width: "100%", padding: "14px 12px", borderRadius: 8, border: "1.5px solid #1f2d52", background: "#151d45", color: "#f5f7fb", fontSize: 28, fontWeight: 700, letterSpacing: 8, textAlign: "center", boxSizing: "border-box", marginBottom: 16 }}
+            />
+            {regError && <p style={{ color: "#ef4444", fontSize: 13, margin: "0 0 12px" }}>{regError}</p>}
+            <button
+              type="submit"
+              disabled={regLoading || regOtpCode.length !== 6}
+              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#22c55e", color: "white", fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer", opacity: regLoading ? 0.6 : 1, marginBottom: 12 }}
+            >
+              {regLoading ? "Creating Account..." : "Verify & Create Account"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowRegOtp(false); setRegOtpCode(""); setRegError(""); setRegTestOtpCode(""); }}
+              style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#151d45", color: "#9ca3b3", fontSize: 14, fontWeight: 600, border: "1px solid #1f2d52", cursor: "pointer" }}
+            >
+              Back to Registration
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== REGISTRATION THANK YOU SCREEN =====
+  if (showRegThankYou && !authUser) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", background: "#0a0e27", boxSizing: "border-box" }}>
+        <div style={{ width: "100%", maxWidth: 420, background: "#0f1535", borderRadius: 16, padding: "40px 28px", border: "1px solid #1f2d52", boxShadow: "0 24px 80px rgba(0,0,0,0.4)", textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: "#22c55e", marginBottom: 8 }}>You're Registered!</div>
+          <div style={{ fontSize: 15, color: "#f5f7fb", fontWeight: 600, marginBottom: 16 }}>
+            Welcome to RIN, {regFullName.split(" ")[0]}.
+          </div>
+          <div style={{ background: "rgba(34, 197, 94, 0.08)", border: "1px solid rgba(34, 197, 94, 0.25)", borderRadius: 10, padding: "16px 20px", marginBottom: 28, textAlign: "left" }}>
+            <div style={{ fontSize: 13, color: "#9ca3b3", lineHeight: 1.7 }}>
+              <div style={{ fontWeight: 600, color: "#22c55e", marginBottom: 8, fontSize: 14 }}>What happens next:</div>
+              <div>📱 You will receive an <strong style={{ color: "#f5f7fb" }}>SMS confirmation</strong> to {regOtpMasked} once your application is reviewed.</div>
+              <div style={{ marginTop: 8 }}>🔒 Once confirmed, you can sign in and start using the RIN Price Quote tool.</div>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setShowRegThankYou(false);
+              setAuthView("login");
+              setLoginUsername(pendingRegPhone);
+            }}
+            style={{ width: "100%", padding: "14px", borderRadius: 8, background: "#e94560", color: "white", fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer" }}
+          >
+            Go to Sign In
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ===== REFERRAL MODAL (optional, on main screen) =====
   if (showReferral && authUser) {
     const referralUrl = `https://rin-app-download-page.netlify.app?ref=${authUser.username}`;
@@ -878,11 +1022,29 @@ export default function App() {
 
           {/* === REGISTER === */}
           {authView === "register" && (
-            <form onSubmit={handleRegister}>
+            <form onSubmit={handleRegister} autoComplete="off">
               <label style={labelStyle}>Full Name *</label>
               <input type="text" value={regFullName} onChange={e => { setRegFullName(e.target.value); if (regError) setRegError(""); }} placeholder="" autoFocus style={inputStyle} />
               <label style={labelStyle}>Phone Number *</label>
-              <input type="tel" value={regPhone} onChange={e => { setRegPhone(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
+              <input
+                type="tel"
+                value={regPhone}
+                onChange={e => {
+                  const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+                  let val = "";
+                  if (digits.length <= 3) {
+                    val = digits.length > 0 ? `(${digits}` : "";
+                  } else if (digits.length <= 6) {
+                    val = `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+                  } else {
+                    val = `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+                  }
+                  setRegPhone(val);
+                  if (regError) setRegError("");
+                }}
+                placeholder="(647) 555-1234"
+                style={inputStyle}
+              />
               <label style={labelStyle}>Operator Type *</label>
               <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#f5f7fb", fontSize: 14 }}>
@@ -895,13 +1057,13 @@ export default function App() {
                 </label>
               </div>
               <label style={labelStyle}>Email</label>
-              <input type="email" value={regEmail} onChange={e => { setRegEmail(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
+              <input type="email" value={regEmail} onChange={e => { setRegEmail(e.target.value); if (regError) setRegError(""); }} placeholder="" autoComplete="off" style={inputStyle} />
               <label style={labelStyle}>Company</label>
-              <input type="text" value={regCompany} onChange={e => { setRegCompany(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
+              <input type="text" value={regCompany} onChange={e => { setRegCompany(e.target.value); if (regError) setRegError(""); }} placeholder="" autoComplete="off" style={inputStyle} />
               <label style={labelStyle}>Password * <span style={{ fontWeight: 400, color: "#6b7590" }}>(min 6 characters)</span></label>
-              <input type="password" value={regPassword} onChange={e => { setRegPassword(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
+              <input type="password" value={regPassword} onChange={e => { setRegPassword(e.target.value); if (regError) setRegError(""); }} placeholder="" autoComplete="new-password" style={inputStyle} />
               <label style={labelStyle}>Confirm Password *</label>
-              <input type="password" value={regConfirmPassword} onChange={e => { setRegConfirmPassword(e.target.value); if (regError) setRegError(""); }} placeholder="" style={inputStyle} />
+              <input type="password" value={regConfirmPassword} onChange={e => { setRegConfirmPassword(e.target.value); if (regError) setRegError(""); }} placeholder="" autoComplete="new-password" style={inputStyle} />
               {regError && <p style={{ color: "#dc3545", fontSize: 13, margin: "0 0 12px" }}>{regError}</p>}
               {regSuccess && <p style={{ color: "#198754", fontSize: 13, margin: "0 0 12px", fontWeight: 600 }}>{regSuccess}</p>}
               <button type="submit" disabled={regLoading} style={{ ...btnStyle, background: "#22c55e", opacity: regLoading ? 0.6 : 1, marginBottom: 16 }}>
