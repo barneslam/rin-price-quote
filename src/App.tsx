@@ -322,8 +322,8 @@ export default function App() {
     }
 
     setPendingAuthUser({ user_id: "", username: normalizedPhone, full_name: "", company: "" });
-    setOtpMaskedPhone(otpResp.phone_masked || `+1 *** *** ${normalizedPhone.slice(-4)}`);
-    
+   setOtpMaskedPhone(`+1 (***) ***-${normalizedPhone.slice(-4)}`);
+
     // Send real SMS via edge function
 await supabase.functions.invoke("send-quote-otp", {
   body: { username: normalizedPhone }
