@@ -408,25 +408,16 @@ export default function App() {
     setRegLoading(true);
 
     // Call edge function to generate OTP and send SMS
-    const edgeRes = await fetch(
-      "https://zyoszbmahxnfcokuzkuv.supabase.co/functions/v1/send-registration-otp",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5b3N6Ym1haHhuZmNva3V6a3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDU3OTMsImV4cCI6MjA4OTA4MTc5M30.Ilz4RYTcgZU3IMnABg0eV7iAfFcC0iykyl4DOln-mjY",
-        },
-        body: JSON.stringify({ phone: normalizedPhone }),
-      }
-    );
+    const { data: edgeData, error: edgeError } = await supabase.functions.invoke(
+  "send-registration-otp",
+  { body: { phone: normalizedPhone } }
+);
+setRegLoading(false);
 
-    const edgeData = await edgeRes.json();
-    setRegLoading(false);
-
-    if (!edgeRes.ok || !edgeData.success) {
-      setRegError(edgeData.error || "Failed to send verification code");
-      return;
-    }
+if (edgeError || !edgeData?.success) {
+  setRegError(edgeData?.error || edgeError?.message || "Failed to send verification code");
+  return;
+}
 
     setPendingRegPhone(normalizedPhone);
     setRegOtpMasked(edgeData.phone_masked || `+1 *** *** ${normalizedPhone.slice(-4)}`);
