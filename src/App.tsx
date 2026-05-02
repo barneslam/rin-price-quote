@@ -310,30 +310,23 @@ export default function App() {
       return;
     }
 
-    // Generate OTP directly (phone-based access, no password required)
-    const { data, error } = await supabase.rpc("generate_quote_user_otp", {
-      p_username: normalizedPhone,  // Use phone as identifier (digits only)
+    // Send OTP via edge function (generates, stores, and sends SMS in one call)
+    const { data: otpResp, error: otpErr } = await supabase.functions.invoke("send-quote-otp", {
+      body: { username: normalizedPhone }
     });
 
-    if (error || !data || !(data as any).success) {
-      setLoginError((data as any)?.error || "Phone number not found");
+    if (otpErr || !otpResp?.success) {
+      setLoginError(otpResp?.error || "Phone number not found");
       setLoginLoading(false);
       return;
     }
 
-    // Create temporary user object from OTP response
-    const tempUser: AuthUser = {
-      user_id: (data as any).user_id,
-      username: (data as any).phone || loginUsername,
-      full_name: "",  // Will be populated after OTP verification
-      company: "",
-    };
-
-    setPendingAuthUser(tempUser);
-    setOtpMaskedPhone((data as any).phone);
+    setPendingAuthUser({ user_id: "", username: normalizedPhone, full_name: "", company: "" });
+    setOtpMaskedPhone(otpResp.phone_masked || `+1 *** *** ${normalizedPhone.slice(-4)}`);
+    
     // Send real SMS via edge function
 await supabase.functions.invoke("send-quote-otp", {
-  body: { phone: `+1${normalizedPhone}` }
+  body: { username: normalizedPhone }
 }); 
     setTestOtpCode(""); // Disabled in production
     setShowOtp(true);
