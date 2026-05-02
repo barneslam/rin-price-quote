@@ -529,6 +529,10 @@ if (edgeError || !edgeData?.success) {
   }
 
   function handleLogout() {
+    setShowLogoutConfirm(true);
+  }
+
+  function confirmLogout() {
     if (authUser) {
       supabase.from("quote_usage_log").insert({
         user_id: authUser.user_id,
@@ -538,6 +542,7 @@ if (edgeError || !edgeData?.success) {
     }
     setAuthUser(null);
     setDisclaimerAccepted(false);
+    setShowLogoutConfirm(false);
   }
 
   async function getAiQuote() {
