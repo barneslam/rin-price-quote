@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 
 const MOBILE_STYLES = `
@@ -187,6 +187,10 @@ export default function App() {
   const [regOtpMasked, setRegOtpMasked] = useState("");
   const [regTestOtpCode, setRegTestOtpCode] = useState(""); // Only populated in dev/fallback
   const [pendingRegPhone, setPendingRegPhone] = useState("");
+
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [screenLocked, setScreenLocked] = useState(false);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Forgot password state
   const [forgotPhone, setForgotPhone] = useState("+1 ");
@@ -726,6 +730,37 @@ if (edgeError || !edgeData?.success) {
     if (!loading && selectedIncident) calculateQuote();
   }, [loading, selectedIncident, distance, vehicleMake, timeOfDay, calculateQuote]);
 
+// ===== SCREEN LOCK =====
+if (screenLocked && authUser) {
+  return (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", background: "#0a0e27", flexDirection: "column", gap: 16, fontFamily: "-apple-system, sans-serif" }}>
+      <div style={{ fontSize: 36, fontWeight: 700, color: "#e94560" }}>RIN</div>
+      <div style={{ fontSize: 15, color: "#9ca3b3" }}>Session locked due to inactivity</div>
+      <button onClick={() => setScreenLocked(false)} style={{ marginTop: 8, padding: "12px 40px", borderRadius: 8, background: "#e94560", color: "white", fontSize: 15, fontWeight: 600, border: "none", cursor: "pointer" }}>
+        Unlock
+      </button>
+    </div>
+  );
+}
+
+// ===== LOGOUT CONFIRMATION =====
+if (showLogoutConfirm) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "-apple-system, sans-serif" }}>
+      <div style={{ background: "#0f1535", borderRadius: 16, padding: "32px 24px", width: "100%", maxWidth: 360, border: "1px solid #1f2d52", textAlign: "center" }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#f5f7fb", marginBottom: 8 }}>Sign Out?</div>
+        <div style={{ fontSize: 13, color: "#9ca3b3", marginBottom: 24 }}>You will be returned to the login screen.</div>
+        <button onClick={confirmLogout} style={{ width: "100%", padding: 12, borderRadius: 8, background: "#e94560", color: "white", fontSize: 15, fontWeight: 600, border: "none", cursor: "pointer", marginBottom: 10 }}>
+          Yes, Sign Out
+        </button>
+        <button onClick={() => setShowLogoutConfirm(false)} style={{ width: "100%", padding: 12, borderRadius: 8, background: "#151d45", color: "#9ca3b3", fontSize: 14, fontWeight: 600, border: "1px solid #1f2d52", cursor: "pointer" }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+  
   // ===== OTP VERIFICATION (must come before general auth check) =====
   if (showOtp && !authUser) {
     return (
