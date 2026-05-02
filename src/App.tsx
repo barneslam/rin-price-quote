@@ -331,6 +331,10 @@ export default function App() {
 
     setPendingAuthUser(tempUser);
     setOtpMaskedPhone((data as any).phone);
+    // Send real SMS via edge function
+await supabase.functions.invoke("send-quote-otp", {
+  body: { phone: `+1${normalizedPhone}` }
+}); 
     setTestOtpCode(""); // Disabled in production
     setShowOtp(true);
     setLoginLoading(false);
